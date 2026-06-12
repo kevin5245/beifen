@@ -1,0 +1,286 @@
+import crypto from 'node:crypto';
+import { Buffer } from 'node:buffer';
+
+// ================= 配置区 =================
+const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczpcL1wvYXBpLm9wZW5pbS5jb20iLCJpYXQiOjE3ODA4MzE3NTAsImV4cCI6MTc4MTQzNjU1MCwiZGF0YSI6eyJpZCI6OTgzMDk1LCJ1c2VyaWQiOiJJUWRnV0VSdiIsInVzZXJfaWQiOiJJUWRnV0VSdiIsInVzZXJfbmlja25hbWUiOiJcdTVjMGZcdTc0MDNcdThmZjdJUWRnV0VSdiIsIm1vYmlsZSI6IiIsImNoYXRyb29tX2lkIjoiIiwicG9ydHJhaXQiOiJodHRwczpcL1wvb3BlbmltLWFwaS5jaGZ4ZDhoc3dlb3RlLnh5elwvb2JqZWN0XC9pbUFkbWluXC9pbS1kZWZhdWx0LmpwZyIsImV4cGVyaWVuY2UiOiIzMC4wMCIsIm5leHRfZXhwZXJpZW5jZSI6MTAwLCJncmFkZSI6MywiZmFuc19udW0iOjMsImNvaW5fbnVtIjowLCJkaWFtb25kX251bSI6MCwicGF5cHdkIjowLCJpbV91aWQiOiI3MTg0OTkwNjc1IiwiZW1haWwiOiJpa3VuQGlrdW4ueDEwLmJ6IiwicGFzc3dkX21kNSI6MSwidXNlcl9sb2dpbiI6IiIsImdlbmRlciI6MCwibG9naW5fYXBwIjoxLCJyZWdpc3Rlcl90aW1lIjoiMjAyNi0wNS0xMyAyMjoxOTowNiIsImZvbGxvd19udW0iOjAsImFuY2hvcl9hdXRoIjoiZmFsc2UiLCJoaWdoX2F1dGgiOiJmYWxzZSIsIm9wZXJhdGlvbl9hdXRoIjoiZmFsc2UiLCJjaGF0X2F1dGgiOiJmYWxzZSIsImFsbG93X2FkZF9mcmllbmQiOjEsImltX3Rva2VuIjoiZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SlZjMlZ5U1VRaU9pSTNNVGcwT1Rrd05qYzFJaXdpVUd4aGRHWnZjbTFKUkNJNk5Td2laWGh3SWpveE56azBNak16T1RRM0xDSnVZbVlpT2pFM056ZzJPREUyTkRjc0ltbGhkQ0k2TVRjM09EWTRNVGswTjMwLmZDdTdjZFNKNnBWVHc4Z3ZNLUdSTHdZckVKcElHYVF4VVdlMlE1ZVQ2V1kiLCJjaGF0X3Rva2VuIjoiZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SlZjMlZ5U1VRaU9pSTNNVGcwT1Rrd05qYzFJaXdpVlhObGNsUjVjR1VpT2pFc0lsQnNZWFJtYjNKdFNVUWlPakFzSW1WNGNDSTZPVEkwTlRjNU1UYzFNQ3dpYm1KbUlqb3hOemd3T0RNeE5EVXdMQ0pwWVhRaU9qRTNPREE0TXpFM05UQjkuaTdqOU1idWtfZnlKTnd6b1dLVUtSQWdydm9fVkUyQnlmMl9obkFiV3hqZyIsImhpZ2hfYWNjb3VudCI6MCwib3BlcmF0ZV9hY2NvdW50IjowfX0.ipk3atP7r0N5NsSD-hlmnU9GJq4K-CQF04KaP5vLUjw";
+const SALT = "yKBm0pKLdVcGbnu4XGon13TsyBdEsjj3WVAzszpoqjn3BNmovLgzvcRTxD1Wey7QQ10kcov0b8e9oBi7jAUR";
+const AES_KEY = "j3Qpq3BWs6qUCctm";
+const AES_IV = "b2mdEEYbW1qprFsg";
+
+// 列表接口（若此域名失效，可在开发者工具里搜索 pagelist 关键字并替换此域名）
+const API_PAGELIST = "https://apc.j8w1d1r1p4g4q6t.cc/v14/live/pagelist?plate_id=11&page_size=36";
+// ✨ 已更新：抓包获得的最新有效视频流解析接口
+const PLAY_API = "https://openim-php-api.qaek4a2wjx6bt.cc/v230/play/url";
+
+const MAX_MATCH_CHANNELS = 100; 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ================= 工具函数 =================
+function generateSignature(params) {
+    const sortedKeys = Object.keys(params).sort();
+    const paramStr = sortedKeys.map(k => k + params[k]).join("");
+    const rawStr = paramStr + SALT;
+    return crypto.createHash('md5').update(rawStr).digest('hex');
+}
+
+function decryptData(base64Str) {
+    try {
+        const decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(AES_KEY), Buffer.from(AES_IV));
+        let decrypted = decipher.update(base64Str, 'base64', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (e) {
+        return null;
+    }
+}
+
+// ================= 核心 1：动态获取真实流媒体地址 (带最新设备指纹) =================
+async function fetchRealStreamUrl(roomId, matchId, sportId) {
+    const time = Math.floor(Date.now() / 1000).toString();
+    const payload = {
+        room_id: roomId.toString(),
+        code_id: "lgzm", 
+        time: time,
+        match_id: matchId.toString(),
+        sport_id: sportId.toString()
+    };
+    
+    payload.signature = generateSignature(payload);
+    const bodyParams = new URLSearchParams(payload).toString();
+
+    try {
+        const res = await fetch(PLAY_API, {
+            method: "POST",
+            headers: {
+                "accept": "application/json, text/javascript, */*; q=0.01",
+                "api-version": "8",
+                "authorization": TOKEN,
+                "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "device": "3",
+                "device2": "3",
+                // ✨ 已更新：同步为您抓包中最新的浏览器硬核防封设备指纹
+                "dun-imei": "zh0e/2H47fpEcwQRVVLH+cmcd2pRTMjB", 
+                "imei": "ec05193b49b8622cddf9b24a07e796be",      
+                "platform": "fqzb",
+                "origin": "https://www.fqzb163.com",
+                "referer": "https://www.fqzb163.com/",
+                // ✨ 已更新：伪装成高版本主流浏览器内核
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+            },
+            body: bodyParams
+        });
+
+        if (!res.ok) {
+            return { success: false, error: `HTTP 拦截报错: ${res.status} ${res.statusText}` };
+        }
+
+        const rawText = await res.text();
+        const encryptedText = rawText.trim().replace(/^"|"$/g, '');
+
+        if (!encryptedText) return { success: false, error: "API 返回了空数据" };
+        if (encryptedText.startsWith("{")) return { success: false, error: `API 拒绝下发流，返回: ${encryptedText}` };
+
+        const decryptedStr = decryptData(encryptedText);
+        if (!decryptedStr) return { success: false, error: `解密失败，原始密文: ${encryptedText.substring(0, 50)}...` };
+
+        let finalUrl = null;
+        
+        // 强行只匹配 .flv，绝对不能要 m3u8，防止 CDN 阻断 ts 切片导致 3 秒跳台
+        const urlMatch = decryptedStr.match(/(https?:\/\/[^"'\s]+\.flv[^"'\s]*)/i);
+        if (urlMatch) {
+            finalUrl = urlMatch[1].replace(/\\\//g, '/');
+        } 
+        
+        if (!finalUrl) {
+            try {
+                const parsed = JSON.parse(decryptedStr);
+                const dataObj = parsed.data || parsed;
+                const keys = ['pull_flv_url', 'flv', 'play_url', 'video_url', 'pull_url', 'url'];
+                for (const key of keys) {
+                    if (dataObj[key] && typeof dataObj[key] === 'string' && dataObj[key].includes('.flv')) {
+                        finalUrl = dataObj[key];
+                        break;
+                    }
+                }
+            } catch (jsonErr) {}
+        }
+        
+        if (finalUrl) {
+            return { success: true, url: finalUrl };
+        } else {
+            return { success: false, error: `解密成功但找不到有效的 FLV 链接字段，解密明文为: ${decryptedStr.substring(0, 100)}...` };
+        }
+
+    } catch (e) {
+        return { success: false, error: `代码运行崩溃: ${e.message}` };
+    }
+}
+
+// ================= 核心 2：D1 数据库抓取逻辑 =================
+async function updateD1Database(env) {
+    let validRooms = [];
+    const fetchHeaders = { 
+        "authorization": TOKEN, 
+        "api-version": "8", 
+        "platform": "fqzb", 
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" 
+    };
+
+    for (let page = 0; page <= 1; page++) {
+        const pageUrl = `${API_PAGELIST}&page=${page}`;
+        try {
+            const res = await fetch(pageUrl, { headers: fetchHeaders });
+            const data = await res.json();
+
+            if (data && data.code === 200 && data.data && Array.isArray(data.data)) {
+                for (const room of data.data) {
+                    const roomId = room.chatroom_id || room.room_id;
+                    const matchId = room.match_id;
+                    // 仅抓取官方线路 (888888888)
+                    if (roomId === 888888888 && matchId > 0) {
+                        if (!validRooms.find(r => r.matchId === matchId)) {
+                            validRooms.push({
+                                title: room.room_title || "未知赛事",
+                                logo: room.screenshot_url || "",
+                                group: "原声(全自动秒开)", 
+                                roomId, 
+                                matchId, 
+                                sportId: room.sport_id || 1
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (e) {}
+        if (page === 0) await sleep(800); 
+    }
+
+    validRooms = validRooms.slice(0, MAX_MATCH_CHANNELS);
+    
+    if (validRooms.length === 0) {
+        return { success: false, message: "抓取到 0 个有效房间" };
+    }
+
+    try {
+        await env.DB.prepare("DELETE FROM live_rooms").run();
+        const insertStmt = env.DB.prepare(
+            "INSERT INTO live_rooms (room_id, match_id, sport_id, title, logo, group_name) VALUES (?, ?, ?, ?, ?, ?)"
+        );
+        const batchStatements = validRooms.map(room => 
+            insertStmt.bind(
+                room.roomId.toString(),
+                room.matchId.toString(),
+                room.sportId.toString(),
+                room.title,
+                room.logo,
+                room.group
+            )
+        );
+        await env.DB.batch(batchStatements);
+        return { success: true, count: validRooms.length };
+    } catch (dbError) {
+        return { success: false, message: "数据库写入失败: " + dbError.message };
+    }
+}
+
+// 生成 Playlist 列表
+async function generatePlaylistFromD1(env, host, formatType) {
+    const { results } = await env.DB.prepare("SELECT * FROM live_rooms").all();
+    if (!results || results.length === 0) return null;
+
+    let m3uOutput = "#EXTM3U\n";
+    let txtOutput = "原声(全自动秒开),#genre#\n";
+
+    for (const room of results) {
+        const fullTitle = `${room.title}-蓝光`;
+        const proxyUrl = `${host}/lgzm/${room.match_id}?r=${room.room_id}&s=${room.sport_id}`;
+        txtOutput += `${fullTitle},${proxyUrl}\n`;
+        m3uOutput += `#EXTINF:-1 tvg-logo="${room.logo}" group-title="${room.group_name}",${fullTitle}\n${proxyUrl}\n`;
+    }
+    return formatType === 'txt' ? txtOutput : m3uOutput;
+}
+
+// ================= 核心 3：Worker 路由分发 =================
+export default {
+    async fetch(request, env) {
+        const url = new URL(request.url);
+        
+        // --- 1. 动态解密与视频流透传代理 (防 3 秒跳台版) ---
+        if (url.pathname.startsWith("/lgzm/")) {
+            const matchId = url.pathname.split("/")[2];
+            const roomId = url.searchParams.get("r");
+            const sportId = url.searchParams.get("s");
+
+            if (!matchId || !roomId || !sportId) return new Response("Invalid parameters", { status: 400 });
+
+            // A. 获取真实 FLV 地址
+            const fetchResult = await fetchRealStreamUrl(roomId, matchId, sportId);
+            
+            if (!fetchResult.success) {
+                return new Response(`抓取流媒体失败！\n\n原因: ${fetchResult.error}`, { 
+                    status: 500, 
+                    headers: { "Content-Type": "text/plain; charset=utf-8" } 
+                });
+            }
+
+            const targetUrl = fetchResult.url; 
+
+            try {
+                // B. 伪造来源，请求源站视频流
+                const streamResponse = await fetch(targetUrl, {
+                    headers: {
+                        'Referer': 'https://www.fqzb163.com/',
+                        'Origin': 'https://www.fqzb163.com',
+                        'User-Agent': request.headers.get('user-agent') || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Connection': 'keep-alive',
+                        'Accept-Encoding': 'identity' // 告诉 CDN 不要压缩视频流，防止崩溃
+                    }
+                });
+
+                // C. 清洗并设置防断流响应头，透传给客户端
+                const newHeaders = new Headers(streamResponse.headers);
+                
+                newHeaders.delete('content-length'); // 强转为无尽流媒体
+                newHeaders.delete('access-control-allow-origin');
+                newHeaders.set('Access-Control-Allow-Origin', '*');
+                newHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate'); 
+                newHeaders.set('Transfer-Encoding', 'chunked'); // 明确声明分块传输
+
+                return new Response(streamResponse.body, {
+                    status: streamResponse.status,
+                    headers: newHeaders
+                });
+            } catch (err) {
+                return new Response(`视频流拉取失败: ${err.message}`, { status: 502 });
+            }
+        }
+
+        // --- 2. 外部触发抓取接口 ---
+        if (url.pathname === "/update") {
+            const result = await updateD1Database(env);
+            if (result.success) {
+                return new Response(`抓取成功！已覆写 ${result.count} 个赛事至 D1 数据库。`, {
+                    headers: { "Content-Type": "text/plain; charset=utf-8" }
+                });
+            } else {
+                return new Response(`抓取失败: ${result.message}`, { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+            }
+        }
+
+        // --- 3. 播放列表请求接口 ---
+        let formatType = '';
+        if (url.pathname === "/playlist.m3u" || url.pathname === "/" || url.pathname === "/m3u") formatType = 'm3u';
+        if (url.pathname === "/playlist.txt" || url.pathname === "/txt") formatType = 'txt';
+
+        if (formatType) {
+            const playlistData = await generatePlaylistFromD1(env, url.origin, formatType);
+            if (!playlistData) {
+                return new Response("数据库为空，请先访问 /update 触发抓取", { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+            }
+            const contentType = formatType === 'txt' ? "text/plain; charset=utf-8" : "application/vnd.apple.mpegurl; charset=utf-8";
+            return new Response(playlistData, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
+        }
+
+        return new Response("404 Not Found", { status: 404 });
+    }
+};
