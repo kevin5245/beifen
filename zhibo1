@@ -1,0 +1,203 @@
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // 仅允许访问 /m3u 和 /txt
+    if (path !== "/m3u" && path !== "/txt") {
+      return new Response("请访问 /m3u 或 /txt 路径获取直播源", {
+        status: 404,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8"
+        }
+      });
+    }
+
+    try {
+      // =========================
+      // 1. 获取赛事数据
+      // =========================
+      const eventsResponse = await fetch(
+        "https://api.sportlive.cc/data/events.json",
+        {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+        }
+      );
+
+      const eventsData = await eventsResponse.json();
+
+      // =========================
+      // 2. 提取直播频道
+      // =========================
+      const liveStreams = [];
+
+      if (eventsData.events && Array.isArray(eventsData.events)) {
+        for (const event of eventsData.events) {
+          if (event.channels && Array.isArray(event.channels)) {
+            for (const channel of event.channels) {
+              if (channel.islive === 1) {
+                liveStreams.push({
+                  title: event.title || "未知赛事",
+                  competition: event.competition || "常规赛",
+                  lang: channel.islg || "原音",
+                  hd: channel.ishd || "HD",
+                  id: channel.id
+                });
+              }
+            }
+          }
+        }
+      }
+
+      // =========================
+      // 3. 控制并发数量
+      // Cloudflare Worker 子请求限制
+      // =========================
+      const limitParam =
+        parseInt(url.searchParams.get("limit")) || 100;
+
+      const maxRequests = Math.min(limitParam, 100);
+
+      const targetStreams = liveStreams.slice(0, maxRequests);
+
+      // =========================
+      // 4. 获取真实 m3u8 地址
+      // =========================
+      const fetchStreamUrl = async (stream) => {
+        try {
+          const res = await fetch(
+            "https://data.stnye.cc/data/stream.php",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type":
+                  "application/x-www-form-urlencoded",
+                "User-Agent": "curl/7.68.0"
+              },
+              body: `id=${stream.id}`
+            }
+          );
+
+          const data = await res.json();
+
+          if (data.status === "success" && data.content) {
+            return {
+              ...stream,
+
+              // 修复 http:\/\/xxx.m3u8
+              url: data.content.replace(/\\\//g, "/")
+            };
+          }
+        } catch (err) {
+          console.error(`解析 ID ${stream.id} 失败:`, err);
+        }
+
+        return null;
+      };
+
+      // =========================
+      // 5. 并发解析
+      // =========================
+      const results = await Promise.all(
+        targetStreams.map(fetchStreamUrl)
+      );
+
+      const validResults = results.filter(
+        (r) => r !== null && r.url
+      );
+
+      // =========================
+      // 6. 通用响应头
+      // =========================
+      const baseHeaders = {
+        "Cache-Control":
+          "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+
+        Pragma: "no-cache",
+
+        Expires: "0",
+
+        "Access-Control-Allow-Origin": "*"
+      };
+
+      // =========================
+      // 7. 输出 M3U
+      // =========================
+      if (path === "/m3u") {
+        let m3uContent = "#EXTM3U\n";
+
+        validResults.forEach((r) => {
+          // 清理标题中的空格
+          const formattedTitle = r.title.replace(/\s+/g, "_");
+
+          const channelName =
+            `${r.competition}_${formattedTitle}_${r.lang}_${r.hd}`;
+
+          // IPTV 最兼容写法
+          m3uContent +=
+            `#EXTINF:-1 tvg-name="${channelName}" tvg-id="${channelName}" group-title="职球圈",${channelName}\n` +
+            `${r.url}\n`;
+        });
+
+        return new Response(m3uContent.trim(), {
+          headers: {
+            ...baseHeaders,
+
+            // IPTV 最兼容 MIME
+            "Content-Type":
+              "application/vnd.apple.mpegurl; charset=utf-8"
+          }
+        });
+      }
+
+      // =========================
+      // 8. 输出 TXT
+      // =========================
+      if (path === "/txt") {
+        let txtContent = "职球圈,#genre#\n";
+
+        validResults.forEach((r) => {
+          const formattedTitle = r.title.replace(/\s+/g, "_");
+
+          const channelName =
+            `${r.competition}_${formattedTitle}_${r.lang}_${r.hd}`;
+
+          txtContent += `${channelName},${r.url}\n`;
+        });
+
+        return new Response(txtContent.trim(), {
+          headers: {
+            ...baseHeaders,
+            "Content-Type":
+              "text/plain; charset=utf-8"
+          }
+        });
+      }
+
+      // 理论不会到这里
+      return new Response("未知请求", {
+        status: 400
+      });
+
+    } catch (error) {
+
+      return new Response(
+        `解析时发生内部错误: ${error.message}`,
+        {
+          status: 500,
+          headers: {
+            "Content-Type":
+              "text/plain; charset=utf-8",
+
+            "Cache-Control": "no-store",
+
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+  }
+};
