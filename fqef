@@ -1,0 +1,274 @@
+import crypto from 'node:crypto';
+import { Buffer } from 'node:buffer';
+
+// ================= 配置区 =================
+const TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwczpcL1wvYXBpLm9wZW5pbS5jb20iLCJpYXQiOjE3ODAyMjE1MjAsImV4cCI6MTc4MDgyNjMyMCwiZGF0YSI6eyJpZCI6OTgzMDk1LCJ1c2VyaWQiOiJJUWRnV0VSdiIsInVzZXJfaWQiOiJJUWRnV0VSdiIsInVzZXJfbmlja25hbWUiOiJcdTVjMGZcdTc0MDNcdThmZjdJUWRnV0VSdiIsIm1vYmlsZSI6IiIsImNoYXRyb29tX2lkIjoiIiwicG9ydHJhaXQiOiJodHRwczpcL1wvb3BlbmltLWFwaS5jaGZ4ZDhoc3dlb3RlLnh5elwvb2JqZWN0XC9pbUFkbWluXC9pbS1kZWZhdWx0LmpwZyIsImV4cGVyaWVuY2UiOiIwLjAwIiwibmV4dF9leHBlcmllbmNlIjoyMCwiZ3JhZGUiOjEsImZhbnNfbnVtIjozLCJjb2luX251bSI6MCwiZGlhbW9uZF9udW0iOjAsInBheXB3ZCI6MCwiaW1fdWlkIjoiNzE4NDk5MDY3NSIsImVtYWlsIjoiaWt1bkBpa3VuLngxMC5ieiIsInBhc3N3ZF9tZDUiOjEsInVzZXJfbG9naW4iOiIiLCJnZW5kZXIiOjAsImxvZ2luX2FwcCI6MSwicmVnaXN0ZXJfdGltZSI6IjIwMjYtMDUtMTMgMjI6MTk6MDYiLCJmb2xsb3dfbnVtIjowLCJhbmNob3JfYXV0aCI6ImZhbHNlIiwiaGlnaF9hdXRoIjoiZmFsc2UiLCJvcGVyYXRpb25fYXV0aCI6ImZhbHNlIiwiY2hhdF9hdXRoIjoiZmFsc2UiLCJhbGxvd19hZGRfZnJpZW5kIjoxLCJpbV90b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpWYzJWeVNVUWlPaUkzTVRnME9Ua3dOamMxSWl3aVVHeGhkR1p2Y20xSlJDSTZOU3dpWlhod0lqb3hOemswTWpNek9UUTNMQ0p1WW1ZaU9qRTNOemcyT0RFMk5EY3NJbWxoZENJNk1UYzNPRFk0TVRrME4zMC5mQ3U3Y2RTSjZwVlR3OGd2TS1HUkx3WXJFSnBJR2FReFVXZTJRNWVUNldZIiwiY2hhdF90b2tlbiI6ImV5SmhiR2NpT2lKSVV6STFOaUlzSW5SNWNDSTZJa3BYVkNKOS5leUpWYzJWeVNVUWlPaUkzTVRnME9Ua3dOamMxSWl3aVZYTmxjbFI1Y0dVaU9qRXNJbEJzWVhSbWIzSnRTVVFpT2pBc0ltVjRjQ0k2T1RJME5URTRNVFV5TUN3aWJtSm1Jam94Tnpnd01qSXhNakl3TENKcFlYUWlPakUzT0RBeU1qRTFNakI5LkoxZVNFN3hHVkM0UEhpTGRzWjNzVVd1SkNLXzhIamEtU1dIdWEtWWlfd3MiLCJoaWdoX2FjY291bnQiOjAsIm9wZXJhdGVfYWNjb3VudCI6MH19.a2XuT3NjBQjnP0N_FyRVZuNEklk_FZg2_t9r-BWVcZE";
+const SALT = "yKBm0pKLdVcGbnu4XGon13TsyBdEsjj3WVAzszpoqjn3BNmovLgzvcRTxD1Wey7QQ10kcov0b8e9oBi7jAUR";
+const AES_KEY = "j3Qpq3BWs6qUCctm";
+const AES_IV = "b2mdEEYbW1qprFsg";
+
+const API_PAGELIST = "https://apc.j8w1d1r1p4g4q6t.cc/v14/live/pagelist?plate_id=11&page_size=36";
+const PLAY_API = "https://openim-php-api.x3t9p9f5h0l3.cc/v230/play/url";
+
+const MAX_MATCH_CHANNELS = 47; 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ================= 工具函数 =================
+function generateSignature(params) {
+    const sortedKeys = Object.keys(params).sort();
+    const paramStr = sortedKeys.map(k => k + params[k]).join("");
+    const rawStr = paramStr + SALT;
+    return crypto.createHash('md5').update(rawStr).digest('hex');
+}
+
+function decryptData(base64Str) {
+    try {
+        const decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(AES_KEY), Buffer.from(AES_IV));
+        let decrypted = decipher.update(base64Str, 'base64', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (e) {
+        return null;
+    }
+}
+
+// 动态获取并解密真实播放地址 (拦截层复用)
+async function fetchRealStreamUrl(roomId, matchId, sportId) {
+    const time = Math.floor(Date.now() / 1000).toString();
+    const payload = {
+        room_id: roomId.toString(),
+        code_id: "lgzm", 
+        time: time,
+        match_id: matchId.toString(),
+        sport_id: sportId.toString()
+    };
+    
+    payload.signature = generateSignature(payload);
+    const bodyParams = new URLSearchParams(payload).toString();
+
+    try {
+        const res = await fetch(PLAY_API, {
+            method: "POST",
+            headers: {
+                "accept": "application/json, text/javascript, */*; q=0.01",
+                "api-version": "8",
+                "authorization": TOKEN,
+                "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
+                "device": "3",
+                "device2": "3",
+                "dun-imei": "GoIjGpOHazlEI0FBEQaSrR9RZwDRokwo",
+                "imei": "2ce3b97beaa09480a790ba5a4387265f",
+                "platform": "fqzb",
+                "origin": "https://www.fqzb163.com/",
+                "referer": "https://www.fqzb163.com/",
+                "user-agent": "Mozilla/5.0"
+            },
+            body: bodyParams
+        });
+
+        const encryptedText = (await res.text()).trim().replace(/^"|"$/g, '');
+        if (!encryptedText || encryptedText.startsWith("{")) return null;
+
+        const decryptedStr = decryptData(encryptedText);
+        if (!decryptedStr) return null;
+
+        let finalUrl = null;
+        const urlMatch = decryptedStr.match(/(https?:\/\/[^"'\s]+\.(?:m3u8|flv)[^"'\s]*)/i);
+        if (urlMatch) {
+            finalUrl = urlMatch[1].replace(/\\\//g, '/');
+        } 
+        
+        if (!finalUrl) {
+            try {
+                const parsed = JSON.parse(decryptedStr);
+                const dataObj = parsed.data || parsed;
+                const keys = ['play_url', 'pull_url', 'pull_flv_url', 'url', 'video_url', 'flv', 'm3u8_url', 'hls_url'];
+                for (const key of keys) {
+                    if (dataObj[key] && typeof dataObj[key] === 'string' && dataObj[key].startsWith('http')) {
+                        finalUrl = dataObj[key];
+                        break;
+                    }
+                }
+            } catch (jsonErr) {}
+        }
+        return finalUrl;
+    } catch (e) {
+        return null;
+    }
+}
+
+function transformDomain(rawUrl) {
+    if (!rawUrl) return null;
+    return rawUrl.replace(/https?:\/\/[a-zA-Z0-9-]+\.ntcwix\.com/ig, "https://tv8.gitee.tech");
+}
+
+// ================= D1 更新与读写核心 =================
+
+// 1. 抓取并覆写 D1 数据库
+async function updateD1Database(env) {
+    let validRooms = [];
+    const fetchHeaders = { 
+        "authorization": TOKEN, 
+        "api-version": "8", 
+        "platform": "fqzb", 
+        "user-agent": "Mozilla/5.0" 
+    };
+
+    // 抓取逻辑
+    for (let page = 0; page <= 1; page++) {
+        const pageUrl = `${API_PAGELIST}&page=${page}`;
+        try {
+            const res = await fetch(pageUrl, { headers: fetchHeaders });
+            const data = await res.json();
+
+            if (data && data.code === 200 && data.data && Array.isArray(data.data)) {
+                for (const room of data.data) {
+                    const roomId = room.chatroom_id || room.room_id;
+                    const matchId = room.match_id;
+                    if (roomId === 888888888 && matchId > 0) {
+                        if (!validRooms.find(r => r.matchId === matchId)) {
+                            validRooms.push({
+                                title: room.room_title || "未知赛事",
+                                logo: room.screenshot_url || "",
+                                group: "原声(播不了上魔法)", 
+                                roomId, 
+                                matchId, 
+                                sportId: room.sport_id || 1
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`Page ${page} error:`, e);
+        }
+        if (page === 0) await sleep(800); 
+    }
+
+    validRooms = validRooms.slice(0, MAX_MATCH_CHANNELS);
+    
+    if (validRooms.length === 0) {
+        return { success: false, message: "抓取到 0 个有效房间，放弃覆写数据库" };
+    }
+
+    try {
+        // D1 事务：先清空，后批量插入
+        await env.DB.prepare("DELETE FROM live_rooms").run();
+
+        const insertStmt = env.DB.prepare(
+            "INSERT INTO live_rooms (room_id, match_id, sport_id, title, logo, group_name) VALUES (?, ?, ?, ?, ?, ?)"
+        );
+
+        const batchStatements = validRooms.map(room => 
+            insertStmt.bind(
+                room.roomId.toString(),
+                room.matchId.toString(),
+                room.sportId.toString(),
+                room.title,
+                room.logo,
+                room.group
+            )
+        );
+
+        await env.DB.batch(batchStatements);
+        return { success: true, count: validRooms.length };
+    } catch (dbError) {
+        return { success: false, message: "数据库写入失败: " + dbError.message };
+    }
+}
+
+// 2. 从 D1 读取并生成 Playlist
+async function generatePlaylistFromD1(env, host, formatType) {
+    const { results } = await env.DB.prepare("SELECT * FROM live_rooms").all();
+    
+    if (!results || results.length === 0) return null;
+
+    let m3uOutput = "#EXTM3U\n";
+    let txtOutput = "原声(播不了上魔法),#genre#\n";
+
+    for (const room of results) {
+        const fullTitle = `${room.title}-蓝光`;
+        // 使用请求进来的 host 进行拼接
+        const proxyUrl = `${host}/lgzm/${room.match_id}?r=${room.room_id}&s=${room.sport_id}`;
+
+        txtOutput += `${fullTitle},${proxyUrl}\n`;
+        m3uOutput += `#EXTINF:-1 tvg-logo="${room.logo}" group-title="${room.group_name}",${fullTitle}\n${proxyUrl}\n`;
+    }
+
+    return formatType === 'txt' ? txtOutput : m3uOutput;
+}
+
+export default {
+    async fetch(request, env) {
+        const url = new URL(request.url);
+        
+        // --- 动态解密播放拦截逻辑 (原封不动，负责用户播放播放流) ---
+        if (url.pathname.startsWith("/lgzm/")) {
+            const matchId = url.pathname.split("/")[2];
+            const roomId = url.searchParams.get("r");
+            const sportId = url.searchParams.get("s");
+
+            if (!matchId || !roomId || !sportId) {
+                return new Response("Invalid parameters", { status: 400 });
+            }
+
+            const rawUrl = await fetchRealStreamUrl(roomId, matchId, sportId);
+            const finalUrl = transformDomain(rawUrl);
+
+            if (finalUrl) {
+                return Response.redirect(finalUrl, 302);
+            } else {
+                return new Response("Failed to parse stream URL", { status: 500 });
+            }
+        }
+
+        // --- 外部触发抓取并覆写 D1 接口 ---
+        if (url.pathname === "/update") {
+            // 你可以给这个接口加一个 query 参数鉴权，例如：if(url.searchParams.get("key") !== "your_password") return ...
+            const result = await updateD1Database(env);
+            if (result.success) {
+                return new Response(`抓取成功！已将 ${result.count} 个赛事覆写至 D1 数据库。`, {
+                    status: 200,
+                    headers: { "Content-Type": "text/plain; charset=utf-8" }
+                });
+            } else {
+                return new Response(`抓取/覆写失败: ${result.message}`, {
+                    status: 500,
+                    headers: { "Content-Type": "text/plain; charset=utf-8" }
+                });
+            }
+        }
+
+        // --- 播放列表请求逻辑 (从 D1 直接读取，极大提升响应速度) ---
+        let formatType = '';
+        if (url.pathname === "/playlist.m3u" || url.pathname === "/" || url.pathname === "/m3u") {
+            formatType = 'm3u';
+        } else if (url.pathname === "/playlist.txt" || url.pathname === "/txt") {
+            formatType = 'txt';
+        } else {
+            return new Response("404 Not Found", { status: 404 });
+        }
+
+        try {
+            const playlistData = await generatePlaylistFromD1(env, url.origin, formatType);
+            
+            if (!playlistData) {
+                return new Response("暂无可用直播流，或数据库为空。请先访问 /update 触发一次抓取。", { 
+                    status: 503,
+                    headers: { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" } 
+                });
+            }
+
+            const contentType = formatType === 'txt' ? 
+                "text/plain; charset=utf-8" : 
+                "application/vnd.apple.mpegurl; charset=utf-8";
+
+            return new Response(playlistData, {
+                headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" }
+            });
+            
+        } catch (err) {
+            return new Response("Server logic error: " + err.message, { status: 500 });
+        }
+    }
+};
